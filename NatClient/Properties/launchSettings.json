@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "NatClient": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
