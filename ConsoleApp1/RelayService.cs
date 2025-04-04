@@ -10,9 +10,9 @@ using NatProtocol;
 
 namespace NatServer
 {
-    internal class RunRelayService
+    internal class RelayService
     {
-        public RunRelayService(CancellationToken token, int relayPort)
+        public RelayService(CancellationToken token, int relayPort)
         {
             var udpClient = new UdpClient(relayPort);
             var endpoints = new ConcurrentDictionary<IPEndPoint, DateTime>();

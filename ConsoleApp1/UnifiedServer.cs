@@ -20,10 +20,10 @@ namespace NatServer
             var cts = new CancellationTokenSource();
 
             // 启动协调服务（TCP）
-            var coordinatorTask = Task.Run(() => new RunCoordinatorService(cts.Token, _coordinatorPort));
+            var coordinatorTask = Task.Run(() => new CoordinatorService(cts.Token, _coordinatorPort));
 
             // 启动中继服务（UDP）
-            var relayTask = Task.Run(() => new RunRelayService(cts.Token, _relayPort));
+            var relayTask = Task.Run(() => new RelayService(cts.Token, _relayPort));
 
             await Task.WhenAll(coordinatorTask, relayTask);
         }

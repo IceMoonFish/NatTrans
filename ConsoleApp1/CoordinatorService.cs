@@ -10,11 +10,11 @@ using NatProtocol;
 
 namespace NatServer
 {
-    internal class RunCoordinatorService
+    internal class CoordinatorService
     {
         private ConcurrentDictionary<string, IPEndPoint> _clients = new();
 
-        public RunCoordinatorService(CancellationToken token, int coordinatorPort)
+        public CoordinatorService(CancellationToken token, int coordinatorPort)
         {
             var listener = new TcpListener(IPAddress.Any, coordinatorPort);
             listener.Start();
