@@ -101,7 +101,7 @@ namespace NatServer
             var relayPacket = PacketBuilder.CreateRelayPacket(
                 senderEp, 
                 targetEp,
-                Encoding.UTF8.GetBytes(message));
+                Encoding.UTF8.GetBytes(payloadStr));
 
             // 发送到目标客户端
             _udpClient.Send(relayPacket, relayPacket.Length, targetEp);
