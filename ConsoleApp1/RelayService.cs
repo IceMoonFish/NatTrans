@@ -11,58 +11,122 @@ using NatProtocol;
 namespace NatServer
 {
     internal class RelayService
-    {
-        public RelayService(CancellationToken token, int relayPort)
-        {
-            var udpClient = new UdpClient(relayPort);
-            var endpoints = new ConcurrentDictionary<IPEndPoint, DateTime>();
+            {
+                // 在RelayService类中添加字段
+        private readonly ConcurrentDictionary<string, IPEndPoint> _clientEndpoints = new ConcurrentDictionary<string, IPEndPoint>();
+        private readonly UdpClient _udpClient;
 
-            // 接收线程
-            Task.Run(() => {
-                while (!token.IsCancellationRequested)
+        public RelayService(
+            CancellationToken token, 
+            int relayPort)
+        {
+            _udpClient = new UdpClient(relayPort);
+
+            // 接收线程（修改后的实现）
+            Task.Run(() => ProcessRelayRequests(token));
+        }
+
+        private void ProcessRelayRequests(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
                 {
                     var remoteEp = new IPEndPoint(IPAddress.Any, 0);
-                    var data = udpClient.Receive(ref remoteEp);
-                    endpoints[remoteEp] = DateTime.UtcNow;
+                    byte[] data = _udpClient.Receive(ref remoteEp);
+                    
+                    // 解析协议头
+                    if (data.Length < ProtocolConstants.HeaderSize) continue;
+                    
+                    var flag = data[0];
+                    var version = data[1];
+                    var srcPort = BitConverter.ToInt32(data, 2);
+                    var destPort = BitConverter.ToInt32(data, 6);
+                    var dataLen = BitConverter.ToInt32(data, 10);
 
-                    // 中继转发逻辑
-                    if (data.Length >= ProtocolConstants.HeaderSize)
+                    // 验证协议头和有效载荷
+                    if (version != ProtocolConstants.ProtocolVersion || 
+                        data.Length < ProtocolConstants.HeaderSize + dataLen)
                     {
-                        var srcPort = BitConverter.ToInt32(data, 2);
-                        var destPort = BitConverter.ToInt32(data, 6);
-                        var dataLen = BitConverter.ToInt32(data, 10);
+                        continue;
+                    }
 
-                        if (data.Length >= ProtocolConstants.HeaderSize + dataLen)
-                        {
-                            var payload = Encoding.UTF8.GetString(
-                                data,
-                                ProtocolConstants.HeaderSize,
-                                dataLen);
+                    // 提取有效载荷
+                    var payload = new byte[dataLen];
+                    Buffer.BlockCopy(data, ProtocolConstants.HeaderSize, payload, 0, dataLen);
 
-                            // 解析目标ID和消息内容
-                            var parts = payload.Split('|', 2);
-                            if (parts.Length == 2)
-                            {
-                                Console.WriteLine($"转发给 {parts[0]} 的消息: {parts[1]}");
-                                // 实际转发逻辑...
-                            }
-                        }
+                    // 根据协议类型处理
+                    switch (flag)
+                    {
+                        case ProtocolConstants.RelayFlag:
+                            ProcessRelayData(remoteEp, payload);
+                            break;
+                        case ProtocolConstants.UdpRegistrationFlag:
+                            ProcessUdpRegistration(remoteEp, payload);
+                            break;
+                        case ProtocolConstants.PunchThroughRequestFlag:
+                            ProcessPunchThrough(remoteEp, payload);
+                            break;
                     }
                 }
-            });
-
-            // 心跳检测线程
-            Task.Run(() => {
-                while (!token.IsCancellationRequested)
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.Interrupted)
                 {
-                    var expired = DateTime.UtcNow.AddMinutes(-5);
-                    foreach (var ep in endpoints.Where(x => x.Value < expired))
-                    {
-                        endpoints.TryRemove(ep.Key, out _);
-                    }
-                    Thread.Sleep(60000);
+                    break; // 正常退出
                 }
-            });
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"中继错误: {ex.Message}");
+                }
+            }
+        }
+
+        private void ProcessRelayData(IPEndPoint senderEp, byte[] payload)
+        {
+            // 解析目标ID和实际数据
+            var payloadStr = Encoding.UTF8.GetString(payload);
+            var parts = payloadStr.Split(new[] {'|'}, 2);
+            if (parts.Length != 2) return;
+
+            var targetId = parts[0];
+            var message = parts[1];
+
+            // 查找目标端点
+            if (!_clientEndpoints.TryGetValue(targetId, out var targetEp))
+            {
+                Console.WriteLine($"找不到目标客户端: {targetId}");
+                return;
+            }
+
+            // 重构数据包（交换源/目标端口）
+            var relayPacket = PacketBuilder.CreateRelayPacket(
+                senderEp, 
+                targetEp,
+                Encoding.UTF8.GetBytes(message));
+
+            // 发送到目标客户端
+            _udpClient.Send(relayPacket, relayPacket.Length, targetEp);
+            Console.WriteLine($"已中继 {senderEp} -> {targetEp}: {message}");
+        }
+        
+        private void ProcessUdpRegistration(IPEndPoint senderEp, byte[] payload)
+        {
+            var clientId = Encoding.UTF8.GetString(payload);
+            _clientEndpoints.AddOrUpdate(clientId, 
+                id => senderEp, 
+                (id, oldEp) => senderEp);
+            Console.WriteLine($"更新NAT映射: {clientId} => {senderEp}");
+        }
+        
+        private void ProcessPunchThrough(IPEndPoint senderEp, byte[] payload)
+        {
+            // NAT打洞协议处理
+            var targetId = Encoding.UTF8.GetString(payload);
+            if (!_clientEndpoints.TryGetValue(targetId, out var targetEp)) return;
+
+            // 发送打洞包（双方互发空包）
+            var punchPacket = Array.Empty<byte>();
+            _udpClient.Send(punchPacket, 0, targetEp);
+            Console.WriteLine($"NAT打洞: {senderEp} <-> {targetEp}");
         }
     }
 }

@@ -18,8 +18,11 @@
 
         // 0x01表示注册，0x02表示中继，0x03表示心跳
         public const byte RegistrationFlag = 0x01; // 注册标识
-        public const byte RelayFlag = 0x02;
-        public const byte HeartbeatFlag = 0x03;
+        public const byte UdpRegistrationFlag = 0x02; // UDP端点注册标志
+
+        public const byte RelayFlag = 0x03; // 中继标识
+        public const byte HeartbeatFlag = 0x04; // 心跳包标识
+        public const byte PunchThroughRequestFlag = 0x06;// NAT打洞请求
         public const int HeaderSize = 14;
     }
 }

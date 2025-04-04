@@ -14,21 +14,35 @@ namespace NatClient
         private UdpClient _udpRelay = new UdpClient(0);
         private TcpClient _tcpCoord = new TcpClient();
 
+        private string _serverIp;
+
         private IPEndPoint _udpRelayServerPoint;
         private IPEndPoint _localUdpEp;
 
+
         public async Task ConnectAsync(string clientId, string serverIp)
         {
-            _udpRelayServerPoint = new IPEndPoint(IPAddress.Parse(serverIp), 5001);
+            _serverIp = serverIp;
+            _udpRelayServerPoint = new IPEndPoint(IPAddress.Parse(_serverIp), 5001);
             _localUdpEp = (IPEndPoint)_udpRelay.Client.LocalEndPoint;
             // 连接协调服务
-            await _tcpCoord.ConnectAsync(serverIp, 5000);
+            await _tcpCoord.ConnectAsync(_serverIp, 5000);
 
             // 注册到协调服务器
             SendRegistration(clientId);
-
+            // 新增UDP端点注册
+            await SendUdpRegistration(clientId);
+            
             // 启动中继监听
             _ = Task.Run(ReceiveRelayData);
+
+
+            // 每5分钟重新上报防止NAT映射过期
+            Timer udpKeepaliveTimer = new Timer(_ => 
+                SendUdpRegistration(clientId), 
+                null, 
+                TimeSpan.Zero, 
+                TimeSpan.FromMinutes(5));
         }
 
          /// <summary>
@@ -45,7 +59,7 @@ namespace NatClient
                 byte[] data = Encoding.UTF8.GetBytes($"{clientId}|{_localUdpEp.Port}");
                 var packet = PacketBuilder.CreateRegistrationPacket(
                     _localUdpEp,
-                    new IPEndPoint(_udpRelayServerPoint.Address, 5000), // TCP协调端点
+                    new IPEndPoint(IPAddress.Parse(_serverIp), 5000), // TCP协调端点
                     data);
 
                 stream.Write(packet, 0, packet.Length);
@@ -54,6 +68,23 @@ namespace NatClient
             {
                 Console.WriteLine($"注册失败: {ex.Message}");
                 // 建议在此处添加重连逻辑
+            }
+        }
+
+                
+        private async Task SendUdpRegistration(string clientId)
+        {
+            try
+            {
+                byte[] data = Encoding.UTF8.GetBytes(clientId);
+         
+                // 发送空包让中继服务记录NAT映射后的公网端点
+                var packet = PacketBuilder.CreateUdpHeartbeatPacket(_localUdpEp, _udpRelayServerPoint, data);
+                await _udpRelay.SendAsync(packet, packet.Length, _udpRelayServerPoint);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"UDP注册失败: {ex.Message}");
             }
         }
 
